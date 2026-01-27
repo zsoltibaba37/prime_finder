@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # coding: utf-8
 
+import os
+os.environ['VISPY_DPI'] = '96'  # WSL-barát, import előtt!
+
 import numpy as np
 from numba import njit
 from time import perf_counter
 import matplotlib.pyplot as plt
-import os
-os.environ['VISPY_DPI'] = '96'
 
 # =========================
 # PARAMÉTEREK
@@ -21,13 +22,11 @@ MODE = "mpl"      # "mpl" vagy "opengl"
 def sieve(n):
     isprime = np.ones(n + 1, dtype=np.bool_)
     isprime[0:2] = False
-
     limit = int(n ** 0.5) + 1
     for i in range(2, limit):
         if isprime[i]:
             for j in range(i * i, n + 1, i):
                 isprime[j] = False
-
     return np.where(isprime)[0]
 
 # =========================
@@ -66,7 +65,7 @@ def plot_matplotlib(qx, qy, colors):
     plt.show()
 
 # =========================
-# OPENGL – VISPY
+# OPENGL – VISPY (WSL-barát)
 # =========================
 def plot_opengl(qx, qy, colors):
     from vispy import scene, app
@@ -75,19 +74,22 @@ def plot_opengl(qx, qy, colors):
         keys='interactive',
         bgcolor='black',
         size=(1000, 1000),
+        dpi=96,        # explicit DPI
         show=True
     )
 
     view = canvas.central_widget.add_view()
     view.camera = 'panzoom'
 
-    pos = np.column_stack((qx, qy, np.zeros_like(qx)))
+    # VisPy float32 és RGBA
+    pos = np.column_stack((qx.astype(np.float32), qy.astype(np.float32), np.zeros_like(qx, dtype=np.float32)))
+    rgba_colors = (colors[:, :3].astype(np.float32),)  # csak RGB, VisPy elfogadja
 
     scatter = scene.visuals.Markers()
     scatter.set_data(
         pos,
-        face_color=None,
-        edge_color=colors,
+        face_color=(0, 0, 0, 0),  # teljesen átlátszó
+        edge_color=colors,        # színek a prímekhez
         size=2
     )
 
