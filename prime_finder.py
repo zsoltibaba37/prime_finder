@@ -129,5 +129,5 @@ if __name__ == "__main__":
     else:
         print("Ismeretlen MODE (mpl / opengl)")
 
-    print("Kész ✅")
+    print("Kész")
 
