@@ -1,133 +1,137 @@
-#!/usr/bin/env python3
-# coding: utf-8
-
-import os
-os.environ['VISPY_DPI'] = '96'  # WSL-barát, import előtt!
-
 import numpy as np
-from numba import njit
+import torch
 from time import perf_counter
-import matplotlib.pyplot as plt
+from vispy import app, scene
+from vispy.scene import visuals
+
+DEVICE = torch.device("cuda")
+
 
 # =========================
-# PARAMÉTEREK
+# CUDA SIEVE
 # =========================
-COUNT = 100_000
-MODE = "mpl"      # "mpl" vagy "opengl"
+def sieve_cuda(n: int) -> torch.Tensor:
+    arr = torch.ones(n + 1, dtype=torch.bool, device=DEVICE)
+    arr[:2] = False
+
+    limit = int(n**0.5) + 1
+    for p in range(2, limit):
+        if arr[p]:
+            arr[p*p:n+1:p] = False
+
+    return torch.nonzero(arr).squeeze(1).to(torch.long)
+
 
 # =========================
-# PRÍMSZÁM GENERÁLÁS
+# POLÁRIS SPIRÁL CUDA-N
 # =========================
-@njit
-def sieve(n):
-    isprime = np.ones(n + 1, dtype=np.bool_)
-    isprime[0:2] = False
-    limit = int(n ** 0.5) + 1
-    for i in range(2, limit):
-        if isprime[i]:
-            for j in range(i * i, n + 1, i):
-                isprime[j] = False
-    return np.where(isprime)[0]
+def spiral_polar_cuda(primes: torch.Tensor):
+    n = primes.to(torch.float32)
+
+    # Spirál paraméterei
+    theta = n * 0.1
+    r = n * 0.02
+
+    x = r * torch.cos(theta)
+    y = r * torch.sin(theta)
+
+    return x.to(torch.float32), y.to(torch.float32)
+
 
 # =========================
-# SPIRÁL SZÁMÍTÁS
+# CUDA COLORS
 # =========================
-def prime_spiral(primes):
-    p = primes.astype(np.float64)
-    c = np.cos(p)
-    s = np.sin(p)
-    qx = p * (c - s)
-    qy = p * (s + c)
-    return qx, qy
+def colors_cuda(primes: torch.Tensor):
+    n = primes.shape[0]
+    t = torch.linspace(0, 1, n, device=DEVICE)
+
+    r = t
+    g = 1 - torch.abs(t - 0.5) * 2
+    g = torch.clamp(g, 0, 1)
+    b = 1 - t
+
+    colors = torch.stack([r, g, b], dim=1)
+    colors = torch.clamp(colors * 1.3, 0, 1)
+    return colors
+
 
 # =========================
-# SZÍNEZÉS
-# =========================
-def make_colors(primes):
-    idx_norm = np.linspace(0, 1, len(primes))
-    log_norm = np.log(primes) / np.log(primes[-1])
-    return plt.cm.turbo(0.6 * idx_norm + 0.4 * log_norm)
-
-# =========================
-# MATPLOTLIB – INTERAKTÍV
-# =========================
-def plot_matplotlib(qx, qy, colors):
-    plt.figure(figsize=(10, 10), dpi=120)
-    plt.scatter(
-        qx, qy,
-        s=1,
-        facecolors='none',
-        edgecolors=colors,
-        linewidths=0.4
-    )
-    plt.axis("equal")
-    plt.title("Prime spiral – matplotlib (zoom / pan)")
-    plt.show()
-
-# =========================
-# OPENGL – VISPY (WSL-barát)
+# OPENGL / VISPY PLOT
 # =========================
 def plot_opengl(qx, qy, colors):
-    from vispy import scene, app
-
     canvas = scene.SceneCanvas(
         keys='interactive',
-        bgcolor='black',
-        size=(1000, 1000),
-        dpi=96,        # explicit DPI
-        show=True
+        show=True,
+        bgcolor='#202020',
+        size=(1000, 1000)
     )
 
     view = canvas.central_widget.add_view()
-    view.camera = 'panzoom'
 
-    # VisPy float32 és RGBA
-    pos = np.column_stack((qx.astype(np.float32), qy.astype(np.float32), np.zeros_like(qx, dtype=np.float32)))
-    rgba_colors = (colors[:, :3].astype(np.float32),)  # csak RGB, VisPy elfogadja
+    pts = np.column_stack((qx, qy))
 
-    scatter = scene.visuals.Markers()
+    scatter = visuals.Markers()
     scatter.set_data(
-        pos,
-        face_color=(0, 0, 0, 0),  # teljesen átlátszó
-        edge_color=colors,        # színek a prímekhez
-        size=2
+        pts,
+        face_color=colors,
+        size=3.5,
+        edge_width=0.0
+    )
+    view.add(scatter)
+
+    span_x = qx.max() - qx.min()
+    span_y = qy.max() - qy.min()
+    span = max(span_x, span_y)
+
+    view.camera = scene.cameras.TurntableCamera(
+        fov=0,
+        elevation=90,
+        azimuth=0,
+        distance=span * 1.2
     )
 
-    view.add(scatter)
-    view.camera.set_range()
+    view.camera.set_range(
+        x=(qx.min(), qx.max()),
+        y=(qy.min(), qy.max())
+    )
 
     app.run()
+
 
 # =========================
 # MAIN
 # =========================
+COUNT = 200000
+
 if __name__ == "__main__":
 
     print(f"Prime spiral | count = {COUNT}")
     print("-" * 40)
 
     t0 = perf_counter()
-    primes = sieve(COUNT)
+    primes = sieve_cuda(COUNT)
     t1 = perf_counter()
-    print(f"Prímek száma     : {len(primes)}")
+    print(f"Prímek száma     : {primes.shape[0]}")
     print(f"Prím generálás   : {t1 - t0:.4f} s")
 
     t0 = perf_counter()
-    qx, qy = prime_spiral(primes)
+    qx_t, qy_t = spiral_polar_cuda(primes)
     t1 = perf_counter()
     print(f"Spirál számítás  : {t1 - t0:.4f} s")
 
-    colors = make_colors(primes)
+    t0 = perf_counter()
+    colors_t = colors_cuda(primes)
+    t1 = perf_counter()
+    print(f"Színezés         : {t1 - t0:.4f} s")
+
+    qx = qx_t.cpu().numpy().astype(np.float32)
+    qy = qy_t.cpu().numpy().astype(np.float32)
+    colors = colors_t.cpu().numpy().astype(np.float32)
 
     print("-" * 40)
-    print(f"Mód: {MODE}")
+    print("OpenGL mód")
 
-    if MODE == "mpl":
-        plot_matplotlib(qx, qy, colors)
-    elif MODE == "opengl":
-        plot_opengl(qx, qy, colors)
-    else:
-        print("Ismeretlen MODE (mpl / opengl)")
+    plot_opengl(qx, qy, colors)
 
     print("Kész")
 
