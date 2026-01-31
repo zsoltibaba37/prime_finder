@@ -8,7 +8,7 @@ Find prime numbers and plot out.
 - Add opengl
 
 
-### The result `count = 100_000`
+### The result `Count = 200000`
 ![prime spiral_numpy](https://github.com/zsoltibaba37/prime_finder/blob/main/Figure_1.png)
 
 ---
